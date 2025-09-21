@@ -12,11 +12,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        # Adiciona os arquivos launch
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
-        # Adiciona os arquivos de mundo
         (os.path.join('share', package_name, 'worlds'), glob('worlds/*.world')),
-
         (os.path.join('share', package_name, 'config'), glob('config/*.*')),
     ],
     install_requires=['setuptools'],
@@ -28,7 +25,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'entregador_node = rob_entregador.entregador_node:main',
+            'vision_node = rob_entregador.vision_node:main',
+            'controller_node = rob_entregador.controller_node:main',
         ],
     },
 )
