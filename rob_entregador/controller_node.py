@@ -73,7 +73,7 @@ class ControllerNode(Node):
             self.get_logger().info(f'Lado do desvio escolhido: {self.lado_desvio}')
 
         twist = Twist()
-        twist.linear.x = 0.1
+        twist.linear.x = 0.25
         twist.angular.z = 0.5 if self.lado_desvio == 'esquerda' else -0.5
 
         self.tentativas_lado += 1
@@ -201,7 +201,7 @@ class ControllerNode(Node):
                 erro_angulo = angulo_para_base - angulo_atual
 
                 twist.angular.z = 0.3 if abs(erro_angulo) > 0.1 and erro_angulo > 0 else -0.3 if abs(erro_angulo) > 0.1 else 0.0
-                twist.linear.x = 0.15 if abs(erro_angulo) <= 0.1 else 0.0
+                twist.linear.x = 0.2 if abs(erro_angulo) <= 0.1 else 0.0
                 self.cmd_vel_pub.publish(twist)
 
         # ---------- ENTREGANDO_ENCOMENDA ----------
