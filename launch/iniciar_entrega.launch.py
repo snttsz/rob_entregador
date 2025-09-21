@@ -1,8 +1,9 @@
-import os
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
+import os
 
 def generate_launch_description():
     pkg_rob_entregador = get_package_share_directory('rob_entregador')
@@ -10,44 +11,31 @@ def generate_launch_description():
 
     world_path = os.path.join(pkg_rob_entregador, 'worlds', 'com_obstaculo_na_frente.world')
     robot_model = 'waffle'
-
-    urdf_file = os.path.join(pkg_turtlebot3_gazebo, 'urdf', 'turtlebot3_' + robot_model + '.urdf')
-    with open(urdf_file, 'r') as f:
-        robot_description = {'robot_description': f.read()}
-    
     sdf_file = os.path.join(pkg_turtlebot3_gazebo, 'models', 'turtlebot3_' + robot_model, 'model.sdf')
 
-    start_gzserver_cmd = ExecuteProcess(
-        cmd=['gzserver', '--verbose', '-s', 'libgazebo_ros_init.so', '-s', 'libgazebo_ros_factory.so', world_path],
-        output='screen'
+    gazebo_launch_dir = os.path.join(get_package_share_directory('gazebo_ros'), 'launch')
+
+    # Inclui o launch oficial do gazebo_ros
+    gazebo = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(gazebo_launch_dir, 'gazebo.launch.py')),
+        launch_arguments={'world': world_path}.items()
     )
 
-    start_gzclient_cmd = ExecuteProcess(
-        cmd=['gzclient', '--render-engine', 'ogre'],
-        output='screen'
-    )
-
-    start_robot_state_publisher_cmd = Node(
-        package='robot_state_publisher',
-        executable='robot_state_publisher',
-        parameters=[robot_description]
-    )
-
-    start_spawn_entity_cmd = Node(
+    spawn_robot = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
         arguments=['-entity', robot_model, '-file', sdf_file],
         output='screen'
     )
-    
-    start_vision_node_cmd = Node(
+
+    vision_node = Node(
         package='rob_entregador',
         executable='vision_node',
         name='vision_node',
         output='screen'
     )
 
-    start_controller_node_cmd = Node(
+    controller_node = Node(
         package='rob_entregador',
         executable='controller_node',
         name='controller_node',
@@ -55,12 +43,9 @@ def generate_launch_description():
     )
 
     ld = LaunchDescription()
-    
-    ld.add_action(start_gzserver_cmd)
-    ld.add_action(start_gzclient_cmd)
-    ld.add_action(start_robot_state_publisher_cmd)
-    ld.add_action(start_spawn_entity_cmd)
-    ld.add_action(start_vision_node_cmd)
-    ld.add_action(start_controller_node_cmd)
+    ld.add_action(gazebo)
+    ld.add_action(spawn_robot)
+    ld.add_action(vision_node)
+    ld.add_action(controller_node)
 
     return ld

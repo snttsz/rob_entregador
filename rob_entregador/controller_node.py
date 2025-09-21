@@ -157,13 +157,13 @@ class ControllerNode(Node):
 
         # ---------- APROXIMANDO_ENCOMENDA ----------
         elif self.estado == Estados.APROXIMANDO_ENCOMENDA:
-            if self.obstaculo_detectado and distancia_frontal < 0.5:
+            if self.obstaculo_detectado and distancia_frontal < 0.4:
                 self.mudar_estado(Estados.OBSTACULO_DETECTADO)
             elif self.encomenda_coletada:
                 self.mudar_estado(Estados.RETORNANDO_PARA_BASE)
             elif not self.encomenda_detectada:
                 self.mudar_estado(Estados.BUSCANDO_ENCOMENDA)
-            elif distancia_frontal < 0.5:
+            elif distancia_frontal < 0.4:
                 self.mudar_estado(Estados.COLETANDO_ENCOMENDA)
             else:
                 erro = self.centro_x_encomenda - 320
@@ -176,7 +176,7 @@ class ControllerNode(Node):
             self.cmd_vel_pub.publish(Twist())
             self.get_logger().info('Encomenda COLETADA! Retornando para base...')
             self.encomenda_coletada = True
-            time.sleep(1)
+            time.sleep(3)
             self.mudar_estado(Estados.RETORNANDO_PARA_BASE)
 
         # ---------- RETORNANDO_PARA_BASE ----------
