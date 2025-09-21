@@ -8,7 +8,7 @@ def generate_launch_description():
     pkg_rob_entregador = get_package_share_directory('rob_entregador')
     pkg_turtlebot3_gazebo = get_package_share_directory('turtlebot3_gazebo')
 
-    world_path = os.path.join(pkg_rob_entregador, 'worlds', 'sem_obstaculos_encomenda_atras.world')
+    world_path = os.path.join(pkg_rob_entregador, 'worlds', 'com_obstaculo_na_frente.world')
     robot_model = 'waffle'
 
     urdf_file = os.path.join(pkg_turtlebot3_gazebo, 'urdf', 'turtlebot3_' + robot_model + '.urdf')

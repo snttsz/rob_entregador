@@ -1,20 +1,3 @@
-"""
-Nó de Controle para o Robô Entregador.
-
-Este nó implementa a máquina de estados que governa o comportamento do robô.
-Ele se baseia nas informações de visão (detecção de encomendas e obstáculos),
-nos dados de odometria e no escaneamento a laser para navegar no ambiente,
-coletar a encomenda e retornar à base.
-
-Subscribers:
-- /encomenda_info (geometry_msgs/Point): Informações sobre a encomenda detectada.
-- /obstaculo_detectado (std_msgs/Bool): Flag que indica a detecção de um obstáculo.
-- /odom (nav_msgs/Odometry): Dados de odometria do robô.
-- /scan (sensor_msgs/LaserScan): Leituras do sensor a laser.
-
-Publishers:
-- /cmd_vel (geometry_msgs/Twist): Comandos de velocidade para o robô.
-"""
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, Point
@@ -26,9 +9,6 @@ import time
 import math
 
 class Estados(Enum):
-    """
-    Enumeração dos estados possíveis da máquina de estados do robô.
-    """
     BUSCANDO_ENCOMENDA = 1
     APROXIMANDO_ENCOMENDA = 2
     COLETANDO_ENCOMENDA = 3
@@ -37,13 +17,7 @@ class Estados(Enum):
     OBSTACULO_DETECTADO = 6
 
 class ControllerNode(Node):
-    """
-    Classe que define o nó de controle do robô.
-    """
     def __init__(self):
-        """
-        Construtor do ControllerNode.
-        """
         super().__init__('controller_node')
         self.estado = Estados.BUSCANDO_ENCOMENDA
         self.get_logger().info(f'Iniciando em estado: {self.estado.name}')
@@ -57,96 +31,161 @@ class ControllerNode(Node):
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
 
-        # Timer para a máquina de estados
+        # Timer
         self.timer = self.create_timer(0.1, self.rodar_maquina_estados)
 
         # Variáveis de estado
         self.encomenda_detectada = False
+        self.encomenda_coletada = False
         self.centro_x_encomenda = 0
         self.obstaculo_detectado = False
         self.pose_atual = None
         self.scan_atual = None
 
-    # ... (callbacks e máquina de estados como no `entregador_node` original, mas adaptados) ...
+        # Para contorno de obstáculo
+        self.lado_desvio = None
+        self.tentativas_lado = 0
+
+    # -------------------- FUNÇÕES AUXILIARES --------------------
     def mudar_estado(self, novo_estado):
         if self.estado != novo_estado:
             self.get_logger().info(f'Mudando de estado: {self.estado.name} -> {novo_estado.name}')
             self.estado = novo_estado
 
+    def contornar_obstaculo(self):
+        """Retorna Twist para contornar obstáculo"""
+        n = len(self.scan_atual.ranges)
+        
+        # Calcula distância frontal
+        distancia_frontal = min(
+            min(self.scan_atual.ranges[0:int(n*0.04)]),
+            min(self.scan_atual.ranges[int(n*0.96):n])
+        )
+
+        # Inicializa lado se ainda não definido
+        if self.lado_desvio is None:
+            ranges_left = self.scan_atual.ranges[int(n*0.16):int(n*0.33)]
+            ranges_right = self.scan_atual.ranges[int(n*0.66):int(n*0.83)]
+            media_left = sum([r for r in ranges_left if r > 0]) / len(ranges_left)
+            media_right = sum([r for r in ranges_right if r > 0]) / len(ranges_right)
+            self.lado_desvio = 'esquerda' if media_left > media_right else 'direita'
+            self.tentativas_lado = 0
+            self.get_logger().info(f'Lado do desvio escolhido: {self.lado_desvio}')
+
+        twist = Twist()
+        twist.linear.x = 0.1
+        twist.angular.z = 0.5 if self.lado_desvio == 'esquerda' else -0.5
+
+        self.tentativas_lado += 1
+
+        # Se obstáculo muito próximo ou tentativas excedidas, recua e recalcula lado
+        if self.tentativas_lado > 50 or distancia_frontal <= 0.2:
+            self.get_logger().info('Obstáculo muito próximo! Recuando 1 metro e recalculando lado...')
+            
+            # Recua 1 metro
+            recuo = Twist()
+            recuo.linear.x = -0.15  # velocidade negativa
+            tempo_recuo = 0.5 / 0.15  # distância/velocidade ~ 1 metro
+            self.cmd_vel_pub.publish(recuo)
+            time.sleep(tempo_recuo)
+            self.cmd_vel_pub.publish(Twist())  # para o robô
+
+            # Recalcula lado
+            ranges_left = self.scan_atual.ranges[int(n*0.16):int(n*0.33)]
+            ranges_right = self.scan_atual.ranges[int(n*0.66):int(n*0.83)]
+            media_left = sum([r for r in ranges_left if r > 0]) / len(ranges_left)
+            media_right = sum([r for r in ranges_right if r > 0]) / len(ranges_right)
+            self.lado_desvio = 'esquerda' if media_left > media_right else 'direita'
+            self.tentativas_lado = 0
+            self.get_logger().info(f'Lado do desvio recalculado: {self.lado_desvio}')
+
+        return twist
+
+    # -------------------- CALLBACKS --------------------
     def encomenda_callback(self, msg: Point):
-        """Callback para informações da encomenda."""
-        if msg.z > 0: # Área da encomenda
+        if msg.z > 0:
             self.encomenda_detectada = True
             self.centro_x_encomenda = msg.x
         else:
             self.encomenda_detectada = False
 
     def obstaculo_callback(self, msg: Bool):
-        """Callback para detecção de obstáculo."""
         self.obstaculo_detectado = msg.data
-        if self.obstaculo_detectado:
+        if self.obstaculo_detectado and not self.encomenda_coletada:
             self.mudar_estado(Estados.OBSTACULO_DETECTADO)
 
     def odom_callback(self, msg: Odometry):
-        """Callback para odometria."""
         self.pose_atual = msg.pose.pose
 
     def scan_callback(self, msg: LaserScan):
-        """Callback para o scan a laser."""
         self.scan_atual = msg
 
+    # -------------------- MÁQUINA DE ESTADOS --------------------
     def rodar_maquina_estados(self):
-        """
-        Executa a lógica da máquina de estados em cada ciclo do timer.
-        """
         if self.scan_atual is None:
             return
-        
-        distancia_frontal = min(min(self.scan_atual.ranges[0:15]), min(self.scan_atual.ranges[345:360]))
 
+        n = len(self.scan_atual.ranges)
+        distancia_frontal = min(
+            min(self.scan_atual.ranges[0:int(n*0.04)]),
+            min(self.scan_atual.ranges[int(n*0.96):n])
+        )
+        self.get_logger().info(f'Distancia frontal: {distancia_frontal:.2f}', throttle_duration_sec=0.5)
+
+        twist = Twist()
+
+        # ---------- OBSTACULO_DETECTADO ----------
         if self.estado == Estados.OBSTACULO_DETECTADO:
             if not self.obstaculo_detectado:
-                self.mudar_estado(Estados.BUSCANDO_ENCOMENDA)
+                self.mudar_estado(Estados.RETORNANDO_PARA_BASE if self.encomenda_coletada else Estados.BUSCANDO_ENCOMENDA)
+                self.lado_desvio = None
+                self.tentativas_lado = 0
             else:
-                self.cmd_vel_pub.publish(Twist())
+                twist = self.contornar_obstaculo()
+                self.cmd_vel_pub.publish(twist)
+                return
 
+        # ---------- BUSCANDO_ENCOMENDA ----------
         elif self.estado == Estados.BUSCANDO_ENCOMENDA:
             if self.obstaculo_detectado and distancia_frontal < 0.4:
                 self.mudar_estado(Estados.OBSTACULO_DETECTADO)
-            elif self.encomenda_detectada:
+            elif self.encomenda_detectada and not self.encomenda_coletada:
                 self.mudar_estado(Estados.APROXIMANDO_ENCOMENDA)
             else:
-                twist = Twist(); twist.angular.z = 0.3; self.cmd_vel_pub.publish(twist)
+                twist.angular.z = 0.3
+                self.cmd_vel_pub.publish(twist)
 
-        # ... (Restante da máquina de estados, similar à versão original)
+        # ---------- APROXIMANDO_ENCOMENDA ----------
         elif self.estado == Estados.APROXIMANDO_ENCOMENDA:
-            if self.obstaculo_detectado and distancia_frontal < 0.4:
+            if self.obstaculo_detectado and distancia_frontal < 0.5:
                 self.mudar_estado(Estados.OBSTACULO_DETECTADO)
+            elif self.encomenda_coletada:
+                self.mudar_estado(Estados.RETORNANDO_PARA_BASE)
             elif not self.encomenda_detectada:
                 self.mudar_estado(Estados.BUSCANDO_ENCOMENDA)
             elif distancia_frontal < 0.5:
                 self.mudar_estado(Estados.COLETANDO_ENCOMENDA)
             else:
                 erro = self.centro_x_encomenda - 320
-                twist = Twist()
                 twist.angular.z = -0.002 * erro
-                twist.linear.x = 0.1
+                twist.linear.x = 0.3 if distancia_frontal >= 0.8 else 0.1
                 self.cmd_vel_pub.publish(twist)
 
+        # ---------- COLETANDO_ENCOMENDA ----------
         elif self.estado == Estados.COLETANDO_ENCOMENDA:
             self.cmd_vel_pub.publish(Twist())
-            self.get_logger().info('Encomenda COLETADA! Retornando...')
+            self.get_logger().info('Encomenda COLETADA! Retornando para base...')
+            self.encomenda_coletada = True
             time.sleep(1)
             self.mudar_estado(Estados.RETORNANDO_PARA_BASE)
 
+        # ---------- RETORNANDO_PARA_BASE ----------
         elif self.estado == Estados.RETORNANDO_PARA_BASE:
-            # ... (Lógica de retorno para a base)
-            if self.pose_atual is None: return
+            if self.pose_atual is None:
+                return
 
-            if distancia_frontal < 0.4:
-                twist = Twist()
-                twist.linear.x = 0.0
-                twist.angular.z = 0.4
+            if self.obstaculo_detectado and distancia_frontal < 0.4:
+                twist = self.contornar_obstaculo()
                 self.cmd_vel_pub.publish(twist)
                 return
 
@@ -156,25 +195,22 @@ class ControllerNode(Node):
             if distancia_da_base < 0.2:
                 self.mudar_estado(Estados.ENTREGANDO_ENCOMENDA)
             else:
-                # Navegação simples em direção à base (0,0)
                 angulo_para_base = math.atan2(-pos_y, -pos_x)
                 qz, qw = self.pose_atual.orientation.z, self.pose_atual.orientation.w
                 angulo_atual = 2 * math.atan2(qz, qw)
                 erro_angulo = angulo_para_base - angulo_atual
 
-                twist = Twist()
-                if abs(erro_angulo) > 0.1:
-                    twist.angular.z = 0.3 if erro_angulo > 0 else -0.3
-                else:
-                    twist.linear.x = 0.15
+                twist.angular.z = 0.3 if abs(erro_angulo) > 0.1 and erro_angulo > 0 else -0.3 if abs(erro_angulo) > 0.1 else 0.0
+                twist.linear.x = 0.15 if abs(erro_angulo) <= 0.1 else 0.0
                 self.cmd_vel_pub.publish(twist)
 
+        # ---------- ENTREGANDO_ENCOMENDA ----------
         elif self.estado == Estados.ENTREGANDO_ENCOMENDA:
             self.cmd_vel_pub.publish(Twist())
             self.get_logger().info('Encomenda entregue! Missão cumprida.')
             self.timer.cancel()
 
-
+# -------------------- MAIN --------------------
 def main(args=None):
     rclpy.init(args=args)
     controller_node = ControllerNode()
