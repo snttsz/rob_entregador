@@ -1,0 +1,30 @@
+# Diretórios de compilação e instalação gerados pelo colcon
+build/
+install/
+log/
+
+# Arquivos de cache e temporários
+.cache/
+.vscode/
+
+# Arquivos específicos de sistemas operacionais
+.DS_Store
+Thumbs.db
+
+# Binários e executáveis
+*.so
+*.a
+*.pyc
+
+# Pacotes Python
+__pycache__/
+
+# Arquivos de configuração do IDE (se aplicável)
+.project
+.cproject
+.settings/
+.idea/
+
+# Outros arquivos temporários
+*~
+*.swp
