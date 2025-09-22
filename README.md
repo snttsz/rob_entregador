@@ -23,7 +23,7 @@ O sistema é dividido em dois nós principais:
 
 3.  **Iniciar a Simulação:**
     ```bash
-    ros2 launch rob_entregador iniciar_entrega.launch.py world:=$(ros2 pkg prefix rob_entregador)/share/rob_entregador/worlds/<world_name>.world timeout:=<float_timeout>
+    ros2 launch rob_entregador iniciar_entrega.launch.py
     ```
 
 ## Detalhes dos Nós
