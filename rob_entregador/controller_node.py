@@ -9,6 +9,9 @@ import time
 import math
 
 class Estados(Enum):
+    """
+    Enumeração dos possíveis estados do robô.
+    """
     BUSCANDO_ENCOMENDA = 1
     APROXIMANDO_ENCOMENDA = 2
     COLETANDO_ENCOMENDA = 3
@@ -17,7 +20,20 @@ class Estados(Enum):
     OBSTACULO_DETECTADO = 6
 
 class ControllerNode(Node):
+    """
+    Nó de controle principal que gerencia o comportamento do robô.
+
+    Este nó implementa uma máquina de estados para controlar o robô em
+    diferentes fases da sua missão: buscar, coletar e entregar uma encomenda,
+    enquanto desvia de obstáculos.
+    """
     def __init__(self):
+        """
+        Construtor do ControllerNode.
+
+        Inicializa os publishers, subscribers, o timer da máquina de estados e
+        as variáveis necessárias para o controle do robô.
+        """
         super().__init__('controller_node')
         self.estado = Estados.BUSCANDO_ENCOMENDA
         self.get_logger().info(f'Iniciando em estado: {self.estado.name}')
@@ -48,12 +64,27 @@ class ControllerNode(Node):
 
     # -------------------- FUNÇÕES AUXILIARES --------------------
     def mudar_estado(self, novo_estado):
+        """
+        Muda o estado atual do robô, registrando a transição.
+
+        Args:
+            novo_estado (Estados): O novo estado para o qual o robô deve transitar.
+        """
         if self.estado != novo_estado:
             self.get_logger().info(f'Mudando de estado: {self.estado.name} -> {novo_estado.name}')
             self.estado = novo_estado
 
     def contornar_obstaculo(self):
-        """Retorna Twist para contornar obstáculo"""
+        """
+        Gera e retorna um comando de velocidade para contornar um obstáculo.
+
+        A estratégia consiste em escolher um lado para desviar (o que tiver mais
+        espaço livre) e avançar virando para esse lado. Se o robô ficar muito
+        próximo do obstáculo, ele recua e recalcula a rota.
+
+        Returns:
+            Twist: O comando de velocidade (linear e angular) para o desvio.
+        """
         n = len(self.scan_atual.ranges)
         
         # Calcula distância frontal
@@ -103,6 +134,14 @@ class ControllerNode(Node):
 
     # -------------------- CALLBACKS --------------------
     def encomenda_callback(self, msg: Point):
+        """
+        Callback para o tópico de informações da encomenda.
+
+        Atualiza se a encomenda foi detectada e a sua posição no eixo X da imagem.
+
+        Args:
+            msg (Point): Mensagem contendo a posição (x, y) e área (z) da encomenda.
+        """
         if msg.z > 0:
             self.encomenda_detectada = True
             self.centro_x_encomenda = msg.x
@@ -110,18 +149,49 @@ class ControllerNode(Node):
             self.encomenda_detectada = False
 
     def obstaculo_callback(self, msg: Bool):
+        """
+        Callback para o tópico de detecção de obstáculos.
+
+        Atualiza a flag de obstáculo detectado e muda o estado do robô se necessário.
+
+        Args:
+            msg (Bool): Mensagem booleana indicando a presença de um obstáculo.
+        """
         self.obstaculo_detectado = msg.data
         if self.obstaculo_detectado and not self.encomenda_coletada:
             self.mudar_estado(Estados.OBSTACULO_DETECTADO)
 
     def odom_callback(self, msg: Odometry):
+        """
+        Callback para o tópico de odometria.
+
+        Armazena a pose atual do robô.
+
+        Args:
+            msg (Odometry): Mensagem de odometria do robô.
+        """
         self.pose_atual = msg.pose.pose
 
     def scan_callback(self, msg: LaserScan):
+        """
+        Callback para o tópico do LaserScan.
+
+        Armazena os dados do scanner a laser mais recentes.
+
+        Args:
+            msg (LaserScan): Mensagem com as leituras do laser.
+        """
         self.scan_atual = msg
 
     # -------------------- MÁQUINA DE ESTADOS --------------------
     def rodar_maquina_estados(self):
+        """
+        Função principal da máquina de estados.
+
+        Executada periodicamente pelo timer, esta função verifica o estado atual
+        do robô e executa a lógica correspondente, publicando os comandos de
+        velocidade apropriados.
+        """
         if self.scan_atual is None:
             return
 
@@ -130,7 +200,6 @@ class ControllerNode(Node):
             min(self.scan_atual.ranges[0:int(n*0.04)]),
             min(self.scan_atual.ranges[int(n*0.96):n])
         )
-        self.get_logger().info(f'Distancia frontal: {distancia_frontal:.2f}', throttle_duration_sec=0.5)
 
         twist = Twist()
 
@@ -157,13 +226,13 @@ class ControllerNode(Node):
 
         # ---------- APROXIMANDO_ENCOMENDA ----------
         elif self.estado == Estados.APROXIMANDO_ENCOMENDA:
-            if self.obstaculo_detectado and distancia_frontal < 0.4:
+            if self.obstaculo_detectado and distancia_frontal < 0.5:
                 self.mudar_estado(Estados.OBSTACULO_DETECTADO)
             elif self.encomenda_coletada:
                 self.mudar_estado(Estados.RETORNANDO_PARA_BASE)
             elif not self.encomenda_detectada:
                 self.mudar_estado(Estados.BUSCANDO_ENCOMENDA)
-            elif distancia_frontal < 0.4:
+            elif distancia_frontal < 0.5:
                 self.mudar_estado(Estados.COLETANDO_ENCOMENDA)
             else:
                 erro = self.centro_x_encomenda - 320
@@ -182,6 +251,7 @@ class ControllerNode(Node):
         # ---------- RETORNANDO_PARA_BASE ----------
         elif self.estado == Estados.RETORNANDO_PARA_BASE:
             if self.pose_atual is None:
+                self.get_logger().warn("Aguardando dados de odometria para retornar à base...", throttle_duration_sec=5)
                 return
 
             if self.obstaculo_detectado and distancia_frontal < 0.4:
@@ -200,9 +270,35 @@ class ControllerNode(Node):
                 angulo_atual = 2 * math.atan2(qz, qw)
                 erro_angulo = angulo_para_base - angulo_atual
 
-                twist.angular.z = 0.3 if abs(erro_angulo) > 0.1 and erro_angulo > 0 else -0.3 if abs(erro_angulo) > 0.1 else 0.0
-                twist.linear.x = 0.2 if abs(erro_angulo) <= 0.1 else 0.0
+                # Normaliza o erro para o intervalo [-pi, pi] para garantir a volta mais curta
+                while erro_angulo > math.pi:
+                    erro_angulo -= 2 * math.pi
+                while erro_angulo < -math.pi:
+                    erro_angulo += 2 * math.pi
+
+                # ==================== NOVA LÓGICA DE CONTROLE ====================
+                
+                twist = Twist()
+                
+                # --- Controle Proporcional para Rotação ---
+                # A velocidade de giro é proporcional ao erro. O '0.4' é o ganho (pode ajustar).
+                twist.angular.z = max(0.4 if erro_angulo > 0 else -0.4, 0.4 * erro_angulo)
+
+                # --- Controle de Velocidade Linear ---
+                # O robô avança mesmo que não esteja perfeitamente alinhado.
+                # A velocidade diminui à medida que o erro de ângulo aumenta.
+                # A função max(0, ...) garante que a velocidade nunca seja negativa.
+                twist.linear.x = 0.7 * max(0, 1.0 - 2.0 * abs(erro_angulo))
+
+                self.get_logger().info(f'erro angulo {erro_angulo} angularz {twist}')
+                
+                # --- Condição de Segurança ---
+                # Se o robô estiver muito desalinhado (ex: mais de 60 graus), ele para e apenas gira.
+                if abs(erro_angulo) > math.pi / 3:
+                    twist.linear.x = 0.0
+
                 self.cmd_vel_pub.publish(twist)
+                # ===============================================================
 
         # ---------- ENTREGANDO_ENCOMENDA ----------
         elif self.estado == Estados.ENTREGANDO_ENCOMENDA:
@@ -212,6 +308,9 @@ class ControllerNode(Node):
 
 # -------------------- MAIN --------------------
 def main(args=None):
+    """
+    Função principal que inicializa e executa o nó de controle.
+    """
     rclpy.init(args=args)
     controller_node = ControllerNode()
     rclpy.spin(controller_node)

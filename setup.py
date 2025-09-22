@@ -14,7 +14,6 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'worlds'), glob('worlds/*.world')),
-        (os.path.join('share', package_name, 'config'), glob('config/*.*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -27,6 +26,7 @@ setup(
         'console_scripts': [
             'vision_node = rob_entregador.vision_node:main',
             'controller_node = rob_entregador.controller_node:main',
+            'statistics_collector = rob_entregador.statistics_collector:main'
         ],
     },
 )
